@@ -45,6 +45,18 @@ jobs:
         name: speed-by-distance
         path: speed_by_distance.csv
 
+    - name: Upload weather performance
+      uses: actions/upload-artifact@v3
+      with:
+        name: weather-performance
+        path: weather_performance.csv
+
+    - name: Upload surface performance
+      uses: actions/upload-artifact@v3
+      with:
+        name: surface-performance
+        path: surface_performance.csv
+
     - name: Upload box performance chart
       uses: actions/upload-artifact@v3
       with:
