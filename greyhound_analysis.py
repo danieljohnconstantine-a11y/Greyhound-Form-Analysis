@@ -10,10 +10,14 @@ def analyze_box_performance(df):
     return box_stats
 
 def plot_box_performance(box_stats):
-    box_stats.plot(kind='bar', title='Win Rate by Box')
+    box_stats.plot(kind='bar', title='Win Rate by Box', color='skyblue')
+    plt.xlabel('Box Number')
+    plt.ylabel('Win Rate')
+    plt.tight_layout()
     plt.savefig('box_performance.png')
 
 if __name__ == "__main__":
-    df = load_data('Greyhound Form Analysis.csv')
+    df = load_data('greyhound_form_analysis.csv')
     box_stats = analyze_box_performance(df)
+    print("Box Performance:\n", box_stats)
     plot_box_performance(box_stats)
