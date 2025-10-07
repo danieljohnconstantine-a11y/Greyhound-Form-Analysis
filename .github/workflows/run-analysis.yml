@@ -1,8 +1,8 @@
 name: Run Greyhound Analysis
 
 on:
-  workflow_dispatch:  # Manual trigger
-  push:               # On every push to main
+  workflow_dispatch:
+  push:
     branches:
       - main
 
@@ -26,3 +26,27 @@ jobs:
     - name: Run analysis
       run: |
         python greyhound_analysis.py
+
+    - name: Upload recommended bets
+      uses: actions/upload-artifact@v3
+      with:
+        name: recommended-bets
+        path: recommended_bets.csv
+
+    - name: Upload ROI table
+      uses: actions/upload-artifact@v3
+      with:
+        name: roi-table
+        path: roi_table.csv
+
+    - name: Upload speed by distance
+      uses: actions/upload-artifact@v3
+      with:
+        name: speed-by-distance
+        path: speed_by_distance.csv
+
+    - name: Upload box performance chart
+      uses: actions/upload-artifact@v3
+      with:
+        name: box-performance-chart
+        path: box_performance.png
