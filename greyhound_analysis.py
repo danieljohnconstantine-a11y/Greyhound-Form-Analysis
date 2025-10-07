@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 
 def load_data(filepath):
     df = pd.read_csv(filepath)
-    # Add any cleaning steps here
     return df
 
 def analyze_box_performance(df):
@@ -12,7 +11,9 @@ def analyze_box_performance(df):
 
 def plot_box_performance(box_stats):
     box_stats.plot(kind='bar', title='Win Rate by Box')
-    plt.xlabel('Box Number')
-    plt.ylabel('Win Rate')
-    plt.tight_layout()
     plt.savefig('box_performance.png')
+
+if __name__ == "__main__":
+    df = load_data('Greyhound Form Analysis.csv')
+    box_stats = analyze_box_performance(df)
+    plot_box_performance(box_stats)
