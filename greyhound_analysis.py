@@ -34,6 +34,12 @@ def distance_trends(df):
 def speed_by_distance(df):
     return df.groupby('Distance')['Speed_kmh'].mean().sort_values(ascending=False)
 
+def weather_performance(df):
+    return (df[df['Win'] == 1].groupby('Weather').size() / df.groupby('Weather').size()).fillna(0)
+
+def surface_performance(df):
+    return (df[df['Win'] == 1].groupby('Surface').size() / df.groupby('Surface').size()).fillna(0)
+
 def betting_roi(df):
     roi = df.groupby('DogName').agg({
         'Odds': 'count',
@@ -48,7 +54,7 @@ def recommend_bets(df, min_recent_wins=2, max_odds=10.0, min_speed=30.0):
         (df['Odds'] <= max_odds) &
         (df['Speed_kmh'] >= min_speed)
     ]
-    return df_filtered[['RaceDate', 'Track', 'DogName', 'Box', 'Odds', 'Trainer', 'Distance', 'Grade', 'RaceTime', 'Speed_kmh', 'RecentWins']]
+    return df_filtered[['RaceDate', 'Track', 'DogName', 'Box', 'Odds', 'Trainer', 'Distance', 'Grade', 'RaceTime', 'Speed_kmh', 'Weather', 'Surface', 'RecentWins']]
 
 def plot_box_performance(box_stats):
     box_stats.plot(kind='bar', title='Win Rate by Box', color='skyblue')
@@ -71,6 +77,8 @@ if __name__ == "__main__":
     grade_stats = grade_performance(df)
     distance_stats = distance_trends(df)
     speed_stats = speed_by_distance(df)
+    weather_stats = weather_performance(df)
+    surface_stats = surface_performance(df)
     roi_stats = betting_roi(df)
     recommended = recommend_bets(df)
 
@@ -80,6 +88,8 @@ if __name__ == "__main__":
     print("\n🎓 Grade Performance:\n", grade_stats)
     print("\n📏 Distance Trends:\n", distance_stats)
     print("\n🚀 Average Speed by Distance:\n", speed_stats)
+    print("\n🌦️ Weather Performance:\n", weather_stats)
+    print("\n🏁 Surface Performance:\n", surface_stats)
     print("\n💰 Betting ROI:\n", roi_stats)
     print("\n🎯 Recommended Bets:\n", recommended)
 
@@ -87,3 +97,5 @@ if __name__ == "__main__":
     save_dataframe(recommended, 'recommended_bets.csv')
     save_dataframe(roi_stats.reset_index(), 'roi_table.csv')
     save_dataframe(speed_stats.reset_index(name='AverageSpeed_kmh'), 'speed_by_distance.csv')
+    save_dataframe(weather_stats.reset_index(name='WinRate'), 'weather_performance.csv')
+    save_dataframe(surface_stats.reset_index(name='WinRate'), 'surface_performance.csv')
