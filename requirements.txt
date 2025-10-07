@@ -1,8 +1,4 @@
 pandas
 numpy
-scipy
-scikit-learn
 pdfplumber
-tabula-py
-joblib
-
+scikit-learn
