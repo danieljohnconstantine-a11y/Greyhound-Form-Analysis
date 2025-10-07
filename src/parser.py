@@ -4,62 +4,68 @@ import pdfplumber
 from .utils import save_df
 
 
-def parse_csv_form(csv_path: str) -> pd.DataFrame:
-    """Read CSV form directly."""
-    df = pd.read_csv(csv_path)
-    return df
+def parse_csv(file_path: str) -> pd.DataFrame:
+    """If the form is already a CSV, read directly."""
+    return pd.read_csv(file_path)
 
 
-def parse_pdf_form(pdf_path: str) -> pd.DataFrame:
-    """Extracts tables from PDF form using pdfplumber."""
+def parse_pdf(file_path: str) -> pd.DataFrame:
+    """Extract text or tables from PDF forms."""
     tables = []
-    with pdfplumber.open(pdf_path) as pdf:
+    with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
-            tbl = page.extract_table()
-            if tbl:
-                df = pd.DataFrame(tbl[1:], columns=tbl[0])
+            table = page.extract_table()
+            if table:
+                df = pd.DataFrame(table[1:], columns=table[0])
                 tables.append(df)
 
-    if tables:
-        df = pd.concat(tables, ignore_index=True)
-    else:
-        df = pd.DataFrame()
+    if not tables:
+        print(f"⚠️ No tables found in {file_path}")
+        return pd.DataFrame()
 
-    # Standardize columns (example placeholders)
+    df = pd.concat(tables, ignore_index=True)
     df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
     return df
 
 
-def parse_form(file_path: str, out_clean_path: str) -> pd.DataFrame:
-    """Parse one form file (PDF or CSV)."""
+def parse_form(file_path: str, out_dir: str) -> pd.DataFrame:
+    """Detect file type and parse accordingly."""
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".csv":
-        df = parse_csv_form(file_path)
+        df = parse_csv(file_path)
     elif ext == ".pdf":
-        df = parse_pdf_form(file_path)
+        df = parse_pdf(file_path)
     else:
-        print(f"⚠️ Unsupported file format: {file_path}")
+        print(f"⚠️ Unsupported file type: {file_path}")
         return pd.DataFrame()
 
-    if not df.empty:
-        save_df(df, out_clean_path)
+    if df.empty:
+        return df
+
+    out_name = os.path.splitext(os.path.basename(file_path))[0] + ".csv"
+    out_path = os.path.join(out_dir, out_name)
+    save_df(df, out_path)
     return df
 
 
 def parse_all_forms(input_dir: str, output_dir: str) -> pd.DataFrame:
-    """Parse every form in input_dir → output_dir → return combined DataFrame."""
+    """Parse all forms and combine them into one DataFrame."""
     all_dfs = []
     for fname in os.listdir(input_dir):
         path = os.path.join(input_dir, fname)
         if not os.path.isfile(path):
             continue
-        out_csv = os.path.join(output_dir, os.path.splitext(fname)[0] + ".csv")
         try:
-            df = parse_form(path, out_csv)
+            df = parse_form(path, output_dir)
             if not df.empty:
                 all_dfs.append(df)
         except Exception as e:
-            print(f"Error parsing {fname}: {e}")
+            print(f"❌ Error parsing {fname}: {e}")
 
-    return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
-
+    if all_dfs:
+        combined = pd.concat(all_dfs, ignore_index=True)
+        print(f"✅ Parsed {len(all_dfs)} files, {len(combined)} rows total.")
+        return combined
+    else:
+        print("⚠️ No valid data extracted.")
+        return pd.DataFrame()
