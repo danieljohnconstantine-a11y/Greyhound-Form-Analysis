@@ -1,30 +1,23 @@
 import pandas as pd
 
 
-def score_dogs(race_df: pd.DataFrame, weights: dict = None) -> pd.DataFrame:
-    if weights is None:
-        weights = {
-            "avg_finish_from_box": -0.2,
-            "best_time": -0.3,
-            "top3_rate": 0.3,
-            "time_stddev": -0.1,
-            "days_since_last": -0.1,
-        }
+def score_and_rank(df: pd.DataFrame) -> pd.DataFrame:
+    """Score each dog per race based on feature weights."""
+    weights = {
+        "speed_mps": 0.35,
+        "top3_rate": 0.25,
+        "avg_finish_from_box": -0.15,
+        "best_time": -0.15,
+        "time_stddev": -0.10,
+    }
 
-    df = race_df.copy()
+    df = df.copy()
     for f in weights:
+        if f not in df.columns:
+            df[f] = 0
         df[f + "_norm"] = (df[f] - df[f].min()) / (df[f].max() - df[f].min() + 1e-6)
 
     df["score"] = sum(df[f + "_norm"] * w for f, w in weights.items())
-    df = df.sort_values("score", ascending=False).reset_index(drop=True)
-    return df
 
-
-def rank_all_races(full_df: pd.DataFrame) -> pd.DataFrame:
-    out_records = []
-    for (track, race_id), grp in full_df.groupby(["track", "race_id"]):
-        scored = score_dogs(grp)
-        scored["rank_in_race"] = scored["score"].rank(ascending=False, method="min")
-        out_records.append(scored)
-    return pd.concat(out_records, ignore_index=True)
-
+    df["rank_in_race"] = df.groupby(["track", "race_id"])["score"].rank(ascending=False, method="min")
+    return df.sort_values(["track", "race_id", "rank_in_race"])
