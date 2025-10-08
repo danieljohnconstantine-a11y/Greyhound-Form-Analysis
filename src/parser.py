@@ -8,11 +8,11 @@ def is_greyhound_race(text):
 def extract_race_metadata(block):
     date_match = re.search(r"(\d{2}/\d{2}/\d{4})", block)
     track_match = re.search(r"([A-Z][a-z]+)\s+Race\s+\d+", block)
-    race_match = re.search(r"Race\s+No\s+(\d+)", block)
-    distance_match = re.search(r"Distance:\s+(\d+m)", block)
-    class_match = re.search(r"Class:\s+(\w+)", block)
-    weather_match = re.search(r"Weather:\s+(\w+)", block)
-    surface_match = re.search(r"Surface:\s+([\w\s]+)", block)
+    race_match = re.search(r"Race\s+(?:No\.?|Number)?\s*(\d+)", block)
+    distance_match = re.search(r"Distance[:\s]+(\d+m)", block)
+    class_match = re.search(r"Class[:\s]+(\w+)", block)
+    weather_match = re.search(r"Weather[:\s]+(\w+)", block)
+    surface_match = re.search(r"Surface[:\s]+([\w\s]+)", block)
 
     return {
         "RaceDate": datetime.strptime(date_match.group(1), "%d/%m/%Y").strftime("%Y-%m-%d") if date_match else "",
@@ -40,7 +40,8 @@ def extract_runners(block):
     return runners
 
 def parse_all_forms(text):
-    race_blocks = re.split(r"Race\s+No\s+\d+", text)
+    # Improved race block splitting
+    race_blocks = re.split(r"(?:Race\s+(?:No\.?|Number)?\s*\d+|R\d+)", text, flags=re.IGNORECASE)
     all_data = []
 
     for block in race_blocks:
