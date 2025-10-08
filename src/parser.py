@@ -3,24 +3,29 @@ import pandas as pd
 from datetime import datetime
 
 def is_greyhound_race(block):
-    return any(name in block for name in ["FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ", "KEEPING", "ASTON"])
+    return any(name in block for name in ["FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ", "KEEPING", "ASTON", "PAW"])
 
 def extract_race_metadata(block, race_number):
-    date_match = re.search(r"(\d{2}/\d{2}/\d{4})", block)
-    track_match = re.search(r"([A-Z][a-z]+)\s+Race\s+\d+", block)
+    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", block) or re.search(r"(\d{2}/\d{2}/\d{4})", block)
     distance_match = re.search(r"(\d{3,4}m)", block)
-    class_match = re.search(r"Grade\s+(\d+)", block)
-    weather_match = re.search(r"Weather[:\s]+(\w+)", block)
-    surface_match = re.search(r"Surface[:\s]+([\w\s]+)", block)
+    track_match = re.search(r"([A-Z]{3,})G\d{4}", block)
+
+    date_str = ""
+    if date_match:
+        raw = date_match.group(1)
+        try:
+            date_str = datetime.strptime(raw, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except:
+            date_str = datetime.strptime(raw, "%d/%m/%Y").strftime("%Y-%m-%d")
 
     return {
-        "RaceDate": datetime.strptime(date_match.group(1), "%d/%m/%Y").strftime("%Y-%m-%d") if date_match else "",
+        "RaceDate": date_str,
         "Track": track_match.group(1) if track_match else "",
         "RaceNumber": str(race_number),
         "Distance": distance_match.group(1) if distance_match else "",
-        "Class": class_match.group(1) if class_match else "",
-        "Weather": weather_match.group(1) if weather_match else "",
-        "Surface": surface_match.group(1) if surface_match else ""
+        "Class": "",
+        "Weather": "",
+        "Surface": ""
     }
 
 def extract_runners(block):
@@ -42,18 +47,29 @@ def parse_all_forms(text):
     lines = text.splitlines()
     race_blocks = []
     current_block = []
-    race_number = 0
+    race_number = 1
+    box_count = 0
+    in_race = False
 
     for line in lines:
-        if re.match(r"^\s*Race\s+\d+", line, re.IGNORECASE):
+        if re.match(r"^\s*1\.\s", line):
             if current_block:
                 race_blocks.append((race_number, "\n".join(current_block)))
+                race_number += 1
                 current_block = []
-            race_number += 1
-        current_block.append(line)
+            in_race = True
+            box_count = 1
+            current_block.append(line)
+        elif in_race and re.match(r"^\s*[2-9|10]\.\s", line):
+            box_count += 1
+            current_block.append(line)
+            if box_count >= 8:
+                in_race = False
+        elif in_race:
+            current_block.append(line)
 
     if current_block:
-        race_blocks.append((race_number + 1, "\n".join(current_block)))
+        race_blocks.append((race_number, "\n".join(current_block)))
 
     all_data = []
     for race_num, block in race_blocks:
