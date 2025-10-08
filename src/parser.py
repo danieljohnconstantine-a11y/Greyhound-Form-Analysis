@@ -1,84 +1,103 @@
+import os
 import re
 import pandas as pd
-from datetime import datetime
+import pdfplumber
+from src.utils import save_df
 
-def is_greyhound_race(block):
-    return any(name in block for name in ["FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ", "KEEPING", "ASTON", "PAW"])
 
-def extract_race_metadata(block, race_number):
-    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", block) or re.search(r"(\d{2}/\d{2}/\d{4})", block)
-    distance_match = re.search(r"(\d{3,4}m)", block)
-    track_match = re.search(r"([A-Z]{3,})G\d{4}", block)
+def parse_pdf_form(pdf_path: str) -> pd.DataFrame:
+    """
+    Extract text-based data from Racing & Sports greyhound form PDFs.
+    Detects each dog's line (box number, name, trainer, last times, etc.)
+    """
+    print(f"📄 Reading PDF: {os.path.basename(pdf_path)}")
 
-    date_str = ""
-    if date_match:
-        raw = date_match.group(1)
-        try:
-            date_str = datetime.strptime(raw, "%Y-%m-%d").strftime("%Y-%m-%d")
-        except:
-            date_str = datetime.strptime(raw, "%d/%m/%Y").strftime("%Y-%m-%d")
+    dogs_data = []
+    current_race = None
+    track_name = os.path.splitext(os.path.basename(pdf_path))[0][:5]  # e.g., QLAKG → QLD track code
 
-    return {
-        "RaceDate": date_str,
-        "Track": track_match.group(1) if track_match else "",
-        "RaceNumber": str(race_number),
-        "Distance": distance_match.group(1) if distance_match else "",
-        "Class": "",
-        "Weather": "",
-        "Surface": ""
-    }
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if not text:
+                continue
 
-def extract_runners(block):
-    pattern = r"(\d+)\.\s+([A-Z][A-Za-z\s\-']+).*?Trainer[:\s]+([A-Za-z\s\-']+)"
-    matches = re.findall(pattern, block, re.DOTALL)
-    runners = []
-    for m in matches:
-        runners.append({
-            "DogName": m[1].strip(),
-            "Box": int(m[0]),
-            "Trainer": m[2].strip(),
-            "PrizeMoney": None,
-            "WinRate": None,
-            "PlaceRate": None
-        })
-    return runners
+            # Detect race header (e.g. "Race 3 – 520m")
+            race_match = re.search(r"Race\s*(\d+).*?(\d{3,4})m", text)
+            if race_match:
+                current_race = int(race_match.group(1))
+                distance = int(race_match.group(2))
+            else:
+                distance = None
 
-def parse_all_forms(text):
-    lines = text.splitlines()
-    race_blocks = []
-    current_block = []
-    race_number = 1
-    box_count = 0
-    in_race = False
+            # Detect dog lines (Box No., Dog Name, Trainer, etc.)
+            lines = text.split("\n")
+            for line in lines:
+                if re.match(r"^\s*\d+\s+[A-Z].*", line):  # starts with box number + name
+                    parts = re.split(r"\s{2,}", line.strip())
+                    if len(parts) < 2:
+                        continue
 
-    for line in lines:
-        if re.match(r"^\s*1\.\s", line):
-            if current_block:
-                race_blocks.append((race_number, "\n".join(current_block)))
-                race_number += 1
-                current_block = []
-            in_race = True
-            box_count = 1
-            current_block.append(line)
-        elif in_race and re.match(r"^\s*[2-9|10]\.\s", line):
-            box_count += 1
-            current_block.append(line)
-            if box_count >= 8:
-                in_race = False
-        elif in_race:
-            current_block.append(line)
+                    # Try to capture dog info
+                    box_no_match = re.match(r"^\d+", parts[0])
+                    box_no = int(box_no_match.group()) if box_no_match else None
+                    dog_name = parts[0].split(" ", 1)[1] if " " in parts[0] else parts[0]
+                    trainer = None
+                    last_3 = None
 
-    if current_block:
-        race_blocks.append((race_number, "\n".join(current_block)))
+                    # Extract time (like "29.87" or "30.10")
+                    time_match = re.search(r"\b\d{2}\.\d{2}\b", line)
+                    time_val = float(time_match.group()) if time_match else None
 
-    all_data = []
-    for race_num, block in race_blocks:
-        if not is_greyhound_race(block):
+                    # Extract placing or performance keywords
+                    placing = None
+                    if "1st" in line:
+                        placing = 1
+                    elif "2nd" in line:
+                        placing = 2
+                    elif "3rd" in line:
+                        placing = 3
+
+                    dogs_data.append({
+                        "track": track_name,
+                        "race": current_race,
+                        "box": box_no,
+                        "dog": dog_name.strip(),
+                        "trainer": trainer,
+                        "time_sec": time_val,
+                        "distance": distance,
+                        "finish_pos": placing,
+                    })
+
+    df = pd.DataFrame(dogs_data)
+    if df.empty:
+        print("⚠️ No dogs detected in this form.")
+    return df
+
+
+def parse_all_forms(input_dir: str, output_dir: str) -> pd.DataFrame:
+    """
+    Parse all form PDFs in input_dir and save cleaned CSVs to output_dir.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    all_dfs = []
+
+    for fname in os.listdir(input_dir):
+        if not fname.lower().endswith(".pdf"):
             continue
-        metadata = extract_race_metadata(block, race_num)
-        runners = extract_runners(block)
-        for runner in runners:
-            runner.update(metadata)
-            all_data.append(runner)
+        fpath = os.path.join(input_dir, fname)
+        print(f"📘 Processing {fname} ...")
+        df = parse_pdf_form(fpath)
+        if not df.empty:
+            out_name = os.path.splitext(fname)[0] + "_clean.csv"
+            save_df(df, os.path.join(output_dir, out_name))
+            all_dfs.append(df)
+            print(f"✅ Saved cleaned data to cleaned_data/{out_name}")
+        else:
+            print(f"⚠️ Skipped {fname} (no usable data)")
 
-    return pd.DataFrame(all_data)
+    if all_dfs:
+        return pd.concat(all_dfs, ignore_index=True)
+    else:
+        print("⚠️ No valid data extracted from any form.")
+        return pd.DataFrame()
