@@ -2,8 +2,8 @@ import re
 import pandas as pd
 from datetime import datetime
 
-def is_greyhound_race(text):
-    return any(name in text for name in ["FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ"])
+def is_greyhound_race(block):
+    return any(name in block for name in ["FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ"])
 
 def extract_race_metadata(block):
     date_match = re.search(r"(\d{2}/\d{2}/\d{4})", block)
@@ -43,12 +43,23 @@ def parse_all_forms(text):
     lines = text.splitlines()
     race_blocks = []
     current_block = []
+    box_count = 0
+
     for line in lines:
-        if re.match(r"^\s*Race\s+\d+\s*[–\-]?", line, re.IGNORECASE):
+        if re.match(r"^\s*1\.\s", line):  # Start of a new race
             if current_block:
                 race_blocks.append("\n".join(current_block))
                 current_block = []
+            box_count = 1
+        elif re.match(r"^\s*[2-9|10]\.\s", line):
+            box_count += 1
         current_block.append(line)
+
+        if box_count >= 8:  # End of race (usually 8 runners)
+            race_blocks.append("\n".join(current_block))
+            current_block = []
+            box_count = 0
+
     if current_block:
         race_blocks.append("\n".join(current_block))
 
