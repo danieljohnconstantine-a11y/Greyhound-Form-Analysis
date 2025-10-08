@@ -1,41 +1,53 @@
 import pandas as pd
+import numpy as np
 
-def recommend(ranks_df: pd.DataFrame, min_score: float = 0.5, max_rank: int = 2) -> pd.DataFrame:
+def recommend(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Recommend top dogs to bet on per race based on score and rank.
-    - Only includes dogs above min_score and within top max_rank per race.
+    Recommend top greyhounds to bet on based on form, speed, and reliability scores.
     """
-    if ranks_df.empty:
-        print("⚠️ No ranked data available for recommendations.")
+
+    if df.empty:
+        print("⚠️ No data provided to recommender.")
         return pd.DataFrame()
 
-    recommendations = []
-    grouped = ranks_df.groupby(["track", "race"])
+    print("🎯 Selecting best dogs to bet...")
 
-    for (track, race_id), group in grouped:
-        # Filter by score threshold and rank position
-        selected = group[(group["score"] >= min_score) & (group["rank_in_race"] <= max_rank)]
-        if selected.empty:
-            continue
+    # Composite score: emphasize form and speed, slightly less consistency
+    df["score"] = (
+        0.5 * df["overall_form"] +
+        0.3 * df["speed_score"] +
+        0.2 * df["reliability"]
+    )
 
-        for _, row in selected.iterrows():
-            bet_type = "WIN" if row["rank_in_race"] == 1 else "PLACE"
-            rec = {
-                "track": track,
-                "race": race_id,
-                "dog": row.get("dog", ""),
-                "box": row.get("box", ""),
-                "score": round(row.get("score", 0), 3),
-                "speed_mps": round(row.get("speed_mps", 0), 2),
-                "top3_rate": round(row.get("top3_rate", 0), 2),
-                "bet_type": bet_type,
-            }
-            recommendations.append(rec)
+    # Normalise 0–1
+    df["score"] = (df["score"] - df["score"].min()) / (df["score"].max() - df["score"].min() + 1e-9)
 
-    if not recommendations:
-        print("⚠️ No dogs met the recommendation criteria.")
-        return pd.DataFrame()
+    # Choose top dogs per race
+    top_dogs = (
+        df.sort_values(["track", "race", "score"], ascending=[True, True, False])
+        .groupby(["track", "race"])
+        .head(3)  # Top 3 per race
+        .reset_index(drop=True)
+    )
 
-    recs_df = pd.DataFrame(recommendations)
-    recs_df = recs_df.sort_values(["track", "race", "score"], ascending=[True, True, False])
-    return recs_df
+    # Label bet types
+    top_dogs["bet_type"] = np.where(
+        top_dogs["score"] > 0.7, "WIN",
+        np.where(top_dogs["score"] > 0.5, "PLACE", "WATCH")
+    )
+
+    # Choose overall "best bet" per track
+    best_per_track = (
+        top_dogs.sort_values(["track", "score"], ascending=[True, False])
+        .groupby("track")
+        .head(1)
+        .assign(bet_type="BEST BET")
+    )
+
+    final = pd.concat([top_dogs, best_per_track]).drop_duplicates()
+
+    # Sort neatly
+    final = final.sort_values(["track", "race", "score"], ascending=[True, True, False])
+
+    print(f"✅ Selected {len(final)} betting recommendations.")
+    return final
