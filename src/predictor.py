@@ -1,57 +1,37 @@
 import pandas as pd
-import numpy as np
 
-def score_dogs(race_df: pd.DataFrame, weights: dict = None) -> pd.DataFrame:
-    """
-    Given one race worth of dogs + features, assign a performance score to each dog.
-    """
-    if race_df.empty:
-        return pd.DataFrame()
+def pick_winners(df):
+    known_trainers = [
+        "Dailly", "Delbridge", "Azzopardi", "Camilleri", "Formosa", "Geall",
+        "Britton", "Petersen", "Bewley", "Priest", "Chilcott", "Robertson"
+    ]
 
-    if weights is None:
-        # You can adjust these weights later based on testing
-        weights = {
-            "speed_mps": 0.35,
-            "top3_rate": 0.25,
-            "avg_finish_from_box": -0.15,  # lower average finish = better
-            "best_time": -0.15,            # lower time = better
-            "time_stddev": -0.10           # more consistent = better
-        }
+    df = df.copy()
 
-    df = race_df.copy()
+    # Normalize and fill missing
+    df["Trainer"] = df["Trainer"].fillna("").str.title()
+    df["WinRate"] = df["WinRate"].astype(float).fillna(0)
+    df["PlaceRate"] = df["PlaceRate"].astype(float).fillna(0)
+    df["PrizeMoney"] = pd.to_numeric(df["PrizeMoney"], errors="coerce").fillna(0)
 
-    # Normalize numeric features to 0–1 scale
-    for col in weights.keys():
-        if col not in df.columns:
-            df[col] = 0
-        values = df[col].astype(float)
-        df[col + "_norm"] = (values - values.min()) / (values.max() - values.min() + 1e-6)
+    # Scoring rules
+    df["BoxScore"] = df["Box"].apply(lambda b: 1 if b in [1, 2, 3, 4] else 0)
+    df["TrainerScore"] = df["Trainer"].apply(lambda x: any(t in x for t in known_trainers)).astype(int)
+    df["WinScore"] = df["WinRate"].apply(lambda x: 1 if x >= 20 else 0)
+    df["PlaceScore"] = df["PlaceRate"].apply(lambda x: 1 if x >= 40 else 0)
+    df["PrizeScore"] = df.groupby(["RaceDate", "Track", "RaceNumber"])["PrizeMoney"].transform(
+        lambda x: (x > x.median()).astype(int)
+    )
 
-    # Compute total weighted score
-    df["score"] = 0
-    for col, w in weights.items():
-        df["score"] += df[col + "_norm"] * w
+    # Total score
+    df["Score"] = df["BoxScore"] + df["TrainerScore"] + df["WinScore"] + df["PlaceScore"] + df["PrizeScore"]
 
-    # Rank dogs in this race by score (1 = best)
-    df["rank_in_race"] = df["score"].rank(ascending=False, method="min")
-    df = df.sort_values("score", ascending=False).reset_index(drop=True)
-    return df
+    # Pick top scorer per race
+    winners = (
+        df.sort_values(by="Score", ascending=False)
+        .groupby(["RaceDate", "Track", "RaceNumber"])
+        .head(1)
+        .reset_index(drop=True)
+    )
 
-
-def rank_all_races(full_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Apply scoring to all races in the full dataset.
-    """
-    if full_df.empty:
-        return pd.DataFrame()
-
-    all_ranked = []
-    grouped = full_df.groupby(["track", "race"], dropna=False)
-
-    for (track, race_id), race_data in grouped:
-        ranked_race = score_dogs(race_data)
-        ranked_race["track"] = track
-        ranked_race["race"] = race_id
-        all_ranked.append(ranked_race)
-
-    return pd.concat(all_ranked, ignore_index=True)
+    return winners
