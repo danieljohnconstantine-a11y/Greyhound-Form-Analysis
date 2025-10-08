@@ -1,71 +1,74 @@
 import os
 import pandas as pd
-import pdfplumber
-from .utils import save_df
+import tabula
+from src.utils import save_df
 
+def parse_pdf_form(pdf_path: str) -> pd.DataFrame:
+    """
+    Extracts all tables from a racing form PDF using tabula-py.
+    Returns a combined DataFrame of all detected race data.
+    """
+    print(f"📄 Reading PDF: {os.path.basename(pdf_path)}")
 
-def parse_csv(file_path: str) -> pd.DataFrame:
-    """If the form is already a CSV, read directly."""
-    return pd.read_csv(file_path)
-
-
-def parse_pdf(file_path: str) -> pd.DataFrame:
-    """Extract text or tables from PDF forms."""
-    tables = []
-    with pdfplumber.open(file_path) as pdf:
-        for page in pdf.pages:
-            table = page.extract_table()
-            if table:
-                df = pd.DataFrame(table[1:], columns=table[0])
-                tables.append(df)
+    try:
+        # Extract all tables from PDF
+        tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True, guess=True, lattice=True)
+    except Exception as e:
+        print(f"❌ Tabula error: {e}")
+        return pd.DataFrame()
 
     if not tables:
-        print(f"⚠️ No tables found in {file_path}")
+        print("⚠️ No tables found in PDF.")
         return pd.DataFrame()
 
-    df = pd.concat(tables, ignore_index=True)
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-    return df
+    # Combine tables into one DataFrame
+    combined = pd.concat(tables, ignore_index=True)
+    combined = combined.dropna(how="all")
+    combined.columns = [str(c).strip().lower().replace(" ", "_") for c in combined.columns]
 
+    # Try to find important columns
+    possible_cols = ["dog", "greyhound", "box", "no", "time", "distance", "place", "finish", "trainer", "split"]
+    keep_cols = [c for c in combined.columns if any(k in c for k in possible_cols)]
 
-def parse_form(file_path: str, out_dir: str) -> pd.DataFrame:
-    """Detect file type and parse accordingly."""
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".csv":
-        df = parse_csv(file_path)
-    elif ext == ".pdf":
-        df = parse_pdf(file_path)
-    else:
-        print(f"⚠️ Unsupported file type: {file_path}")
+    if not keep_cols:
+        print("⚠️ No recognizable race columns found.")
         return pd.DataFrame()
 
-    if df.empty:
-        return df
+    clean_df = combined[keep_cols].copy()
+    clean_df.columns = [c.replace("\n", "_") for c in clean_df.columns]
 
-    out_name = os.path.splitext(os.path.basename(file_path))[0] + ".csv"
-    out_path = os.path.join(out_dir, out_name)
-    save_df(df, out_path)
-    return df
+    # Add metadata
+    clean_df["source_file"] = os.path.basename(pdf_path)
+    return clean_df
 
 
 def parse_all_forms(input_dir: str, output_dir: str) -> pd.DataFrame:
-    """Parse all forms and combine them into one DataFrame."""
+    """
+    Parse all PDF forms in input_dir and save cleaned versions to output_dir.
+    """
     all_dfs = []
+    os.makedirs(output_dir, exist_ok=True)
+
     for fname in os.listdir(input_dir):
         path = os.path.join(input_dir, fname)
-        if not os.path.isfile(path):
+        if not os.path.isfile(path) or not fname.lower().endswith(".pdf"):
             continue
-        try:
-            df = parse_form(path, output_dir)
-            if not df.empty:
-                all_dfs.append(df)
-        except Exception as e:
-            print(f"❌ Error parsing {fname}: {e}")
+
+        print(f"📘 Processing {fname} ...")
+        out_name = os.path.splitext(fname)[0] + "_clean.csv"
+        out_path = os.path.join(output_dir, out_name)
+
+        df = parse_pdf_form(path)
+        if not df.empty:
+            save_df(df, out_path)
+            all_dfs.append(df)
+            print(f"✅ Saved cleaned data to {out_path}")
+        else:
+            print(f"⚠️ Skipped {fname} (no usable data)")
 
     if all_dfs:
-        combined = pd.concat(all_dfs, ignore_index=True)
-        print(f"✅ Parsed {len(all_dfs)} files, {len(combined)} rows total.")
-        return combined
+        full_df = pd.concat(all_dfs, ignore_index=True)
+        return full_df
     else:
-        print("⚠️ No valid data extracted.")
+        print("⚠️ No valid data extracted from any form.")
         return pd.DataFrame()
