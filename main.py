@@ -1,55 +1,54 @@
 import os
+import argparse
 import pandas as pd
-from pdfminer.high_level import extract_text
+from src.utils import ensure_dirs, save_df
 from src.parser import parse_all_forms
-from src.predictor import pick_winners
-
-def convert_pdf_to_text(pdf_path):
-    try:
-        return extract_text(pdf_path)
-    except Exception as e:
-        print(f"❌ Failed to convert {pdf_path}: {e}")
-        return ""
+from src.features import merge_features
+from src.predictor import rank_all_races
+from src.recommender import recommend
 
 def main():
     print("🐾 Starting Greyhound Analysis for today...")
 
-    input_folder = "data"
-    output_folder = "outputs"
-    os.makedirs(output_folder, exist_ok=True)
+    # Folder setup
+    input_dir = "data"
+    clean_dir = "cleaned_data"
+    output_dir = "outputs"
+    ensure_dirs([clean_dir, output_dir])
 
-    all_text = ""
-
-    # Convert all PDFs in data/ to text
-    for filename in os.listdir(input_folder):
-        if filename.endswith(".pdf"):
-            pdf_path = os.path.join(input_folder, filename)
-            print(f"📄 Converting {filename} to text...")
-            text = convert_pdf_to_text(pdf_path)
-            all_text += text + "\n"
-
-    if not all_text.strip():
-        print("🚫 No usable text extracted from PDFs.")
+    # Step 1: Parse race forms
+    print("🐾 Step 1: Parsing race forms...")
+    parsed_df = parse_all_forms(input_dir, clean_dir)
+    if parsed_df.empty:
+        print("⚠️ No data parsed. Exiting.")
         return
 
-    # Parse all races
-    df = parse_all_forms(all_text)
-
-    if df.empty:
-        print("⚠️ No greyhound races detected or parsed.")
+    # Step 2: Build features
+    print("🐾 Step 2: Building dog features...")
+    feat_df = merge_features(parsed_df)
+    if feat_df.empty:
+        print("⚠️ No features generated. Exiting.")
         return
 
-    # Save full parsed data
-    picks_path = os.path.join(output_folder, "picks.csv")
-    df.to_csv(picks_path, index=False)
-    print(f"✅ Parsed {df['RaceNumber'].nunique()} races with {len(df)} runners.")
-    print(f"📁 Full data saved to: {picks_path}")
+    # Step 3: Rank dogs
+    print("🐾 Step 3: Ranking dogs by performance...")
+    ranked = rank_all_races(feat_df)
+    if ranked.empty:
+        print("⚠️ No ranked data. Exiting.")
+        return
 
-    # Predict winners
-    winners = pick_winners(df)
-    winners_path = os.path.join(output_folder, "winners.csv")
-    winners.to_csv(winners_path, index=False)
-    print(f"🏁 Winners saved to: {winners_path}")
+    # Step 4: Recommend bets
+    print("🐾 Step 4: Selecting top betting picks...")
+    recs = recommend(ranked, min_score=0.5, max_rank=2)
+    if recs.empty:
+        print("⚠️ No recommendations found.")
+    else:
+        # Save to CSV
+        picks_path = os.path.join(output_dir, "picks.csv")
+        save_df(recs, picks_path)
+        print(f"✅ Betting recommendations saved to {picks_path}")
+
+    print("\n🎯 Analysis complete.\n")
 
 if __name__ == "__main__":
     main()
