@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from pdfminer.high_level import extract_text
 from src.parser import parse_all_forms
+from src.predictor import pick_winners
 
 def convert_pdf_to_text(pdf_path):
     try:
@@ -14,9 +15,12 @@ def main():
     print("🐾 Starting Greyhound Analysis for today...")
 
     input_folder = "data"
-    output_file = "outputs/picks.csv"
+    output_folder = "outputs"
+    os.makedirs(output_folder, exist_ok=True)
+
     all_text = ""
 
+    # Convert all PDFs in data/ to text
     for filename in os.listdir(input_folder):
         if filename.endswith(".pdf"):
             pdf_path = os.path.join(input_folder, filename)
@@ -28,15 +32,24 @@ def main():
         print("🚫 No usable text extracted from PDFs.")
         return
 
+    # Parse all races
     df = parse_all_forms(all_text)
 
     if df.empty:
         print("⚠️ No greyhound races detected or parsed.")
-    else:
-        os.makedirs("outputs", exist_ok=True)
-        df.to_csv(output_file, index=False)
-        print(f"✅ Parsed {df['RaceNumber'].nunique()} races with {len(df)} runners.")
-        print(f"📁 Results saved to: {output_file}")
+        return
+
+    # Save full parsed data
+    picks_path = os.path.join(output_folder, "picks.csv")
+    df.to_csv(picks_path, index=False)
+    print(f"✅ Parsed {df['RaceNumber'].nunique()} races with {len(df)} runners.")
+    print(f"📁 Full data saved to: {picks_path}")
+
+    # Predict winners
+    winners = pick_winners(df)
+    winners_path = os.path.join(output_folder, "winners.csv")
+    winners.to_csv(winners_path, index=False)
+    print(f"🏁 Winners saved to: {winners_path}")
 
 if __name__ == "__main__":
     main()
