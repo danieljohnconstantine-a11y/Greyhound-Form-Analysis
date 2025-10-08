@@ -1,45 +1,29 @@
 import os
-import argparse
-from src.utils import ensure_dirs, save_df
+import pandas as pd
 from src.parser import parse_all_forms
-from src.features import build_features
-from src.predictor import score_and_rank
-from src.recommender import recommend_bets
 
+def main():
+    print("🐾 Starting Greyhound Analysis for today...")
 
-def main(args):
-    input_dir = args.input_dir
-    clean_dir = args.clean_dir
-    output_dir = args.output_dir
+    input_file = "forms/BDGOG0810form.txt"
+    output_file = "outputs/picks.csv"
 
-    ensure_dirs([clean_dir, output_dir])
-
-    print("🐾 Step 1: Parsing race forms...")
-    raw_df = parse_all_forms(input_dir, clean_dir)
-    if raw_df.empty:
-        print("⚠️ No data parsed. Exiting.")
+    if not os.path.exists(input_file):
+        print(f"🚫 Input file not found: {input_file}")
         return
 
-    print("📊 Step 2: Building features...")
-    feat_df = build_features(raw_df)
+    with open(input_file, "r", encoding="utf-8") as f:
+        raw_text = f.read()
 
-    print("🧮 Step 3: Scoring and ranking dogs...")
-    ranked_df = score_and_rank(feat_df)
+    df = parse_all_forms(raw_text)
 
-    print("🎯 Step 4: Generating betting recommendations...")
-    recs = recommend_bets(ranked_df, min_score=args.min_score, max_rank=args.max_rank)
-
-    picks_path = os.path.join(output_dir, "picks.csv")
-    save_df(recs, picks_path)
-    print(f"✅ Picks saved to {picks_path}")
-
+    if df.empty:
+        print("⚠️ No greyhound races detected or parsed.")
+    else:
+        os.makedirs("outputs", exist_ok=True)
+        df.to_csv(output_file, index=False)
+        print(f"✅ Parsed {df['RaceNumber'].nunique()} races with {len(df)} runners.")
+        print(f"📁 Results saved to: {output_file}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Greyhound Form Analysis Pipeline")
-    parser.add_argument("--input_dir", type=str, default="data", help="Raw forms directory (PDF/CSV)")
-    parser.add_argument("--clean_dir", type=str, default="cleaned_data", help="Parsed CSV output folder")
-    parser.add_argument("--output_dir", type=str, default="outputs", help="Folder for recommendations")
-    parser.add_argument("--min_score", type=float, default=0.5, help="Minimum score threshold")
-    parser.add_argument("--max_rank", type=int, default=2, help="Maximum rank per race to include")
-    args = parser.parse_args()
-    main(args)
+    main()
