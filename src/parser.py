@@ -40,17 +40,24 @@ def extract_runners(block):
     return runners
 
 def parse_all_forms(text):
-    # Split on "Race X –" with optional dash styles
-    race_blocks = re.split(r"(?=Race\s+\d+\s+[–\-])", text)
-    all_data = []
+    lines = text.splitlines()
+    race_blocks = []
+    current_block = []
+    for line in lines:
+        if re.match(r"^\s*Race\s+\d+\s*[–\-]?", line, re.IGNORECASE):
+            if current_block:
+                race_blocks.append("\n".join(current_block))
+                current_block = []
+        current_block.append(line)
+    if current_block:
+        race_blocks.append("\n".join(current_block))
 
+    all_data = []
     for block in race_blocks:
         if not is_greyhound_race(block):
             continue
-
         metadata = extract_race_metadata(block)
         runners = extract_runners(block)
-
         for runner in runners:
             runner.update(metadata)
             all_data.append(runner)
