@@ -1,6 +1,15 @@
 import os
 import pandas as pd
+from pdfminer.high_level import extract_text
 from src.parser import parse_all_forms
+
+def convert_pdf_to_text(pdf_path):
+    try:
+        text = extract_text(pdf_path)
+        return text
+    except Exception as e:
+        print(f"❌ Failed to convert {pdf_path}: {e}")
+        return ""
 
 def main():
     print("🐾 Starting Greyhound Analysis for today...")
@@ -10,12 +19,14 @@ def main():
     all_text = ""
 
     for filename in os.listdir(input_folder):
-        if filename.endswith(".txt"):
-            with open(os.path.join(input_folder, filename), "r", encoding="utf-8") as f:
-                all_text += f.read() + "\n"
+        if filename.endswith(".pdf"):
+            pdf_path = os.path.join(input_folder, filename)
+            print(f"📄 Converting {filename} to text...")
+            text = convert_pdf_to_text(pdf_path)
+            all_text += text + "\n"
 
     if not all_text.strip():
-        print("🚫 No text files found in 'data' folder.")
+        print("🚫 No usable text extracted from PDFs.")
         return
 
     df = parse_all_forms(all_text)
