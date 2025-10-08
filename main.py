@@ -5,17 +5,20 @@ from src.parser import parse_all_forms
 def main():
     print("🐾 Starting Greyhound Analysis for today...")
 
-    input_file = "forms/BDGOG0810form.txt"
+    input_folder = "data"
     output_file = "outputs/picks.csv"
+    all_text = ""
 
-    if not os.path.exists(input_file):
-        print(f"🚫 Input file not found: {input_file}")
+    for filename in os.listdir(input_folder):
+        if filename.endswith(".txt"):
+            with open(os.path.join(input_folder, filename), "r", encoding="utf-8") as f:
+                all_text += f.read() + "\n"
+
+    if not all_text.strip():
+        print("🚫 No text files found in 'data' folder.")
         return
 
-    with open(input_file, "r", encoding="utf-8") as f:
-        raw_text = f.read()
-
-    df = parse_all_forms(raw_text)
+    df = parse_all_forms(all_text)
 
     if df.empty:
         print("⚠️ No greyhound races detected or parsed.")
