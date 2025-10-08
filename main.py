@@ -5,8 +5,7 @@ from src.parser import parse_all_forms
 
 def convert_pdf_to_text(pdf_path):
     try:
-        text = extract_text(pdf_path)
-        return text
+        return extract_text(pdf_path)
     except Exception as e:
         print(f"❌ Failed to convert {pdf_path}: {e}")
         return ""
