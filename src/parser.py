@@ -3,13 +3,7 @@ import pandas as pd
 from datetime import datetime
 
 def is_greyhound_race(text):
-    clues = [
-        r"\bFERNANDO BALE\b", r"\bZAMBORA BROCKIE\b", r"\bKOBLENZ\b",
-        r"\bBox History\b", r"\bBP\b", r"\bMDN\b", r"\bRST WIN\b",
-        r"\bTrack Direction\b", r"\bAnti-Clockwise\b",
-        r"\bDistance: (3\d{2}|4\d{2}|5\d{2})m\b"
-    ]
-    return any(re.search(clue, text, re.IGNORECASE) for clue in clues)
+    return any(name in text for name in ["FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ"])
 
 def extract_race_metadata(block):
     date_match = re.search(r"(\d{2}/\d{2}/\d{4})", block)
@@ -31,17 +25,17 @@ def extract_race_metadata(block):
     }
 
 def extract_runners(block):
-    pattern = r"(\d+)\n([A-Z][A-Za-z\s\-']+)\s+\((\d+)\).*?Trainer:\s+([A-Za-z\s\-']+).*?Prize Money:\s+\$(\d+).*?Win / Place:\s+(\d+%) / (\d+%)"
+    pattern = r"(\d+)\.\s+([A-Z][A-Za-z\s\-']+).*?Trainer[:\s]+([A-Za-z\s\-']+)"
     matches = re.findall(pattern, block, re.DOTALL)
     runners = []
     for m in matches:
         runners.append({
             "DogName": m[1].strip(),
-            "Box": int(m[2]),
-            "Trainer": m[3].strip(),
-            "PrizeMoney": int(m[4]),
-            "WinRate": m[5],
-            "PlaceRate": m[6]
+            "Box": int(m[0]),
+            "Trainer": m[2].strip(),
+            "PrizeMoney": None,
+            "WinRate": None,
+            "PlaceRate": None
         })
     return runners
 
