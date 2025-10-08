@@ -45,7 +45,7 @@ def extract_runners(block):
         })
     return runners
 
-def parse_all_races(text):
+def parse_all_forms(text):
     race_blocks = re.split(r"Race\s+No\s+\d+", text)
     all_data = []
 
@@ -61,15 +61,3 @@ def parse_all_races(text):
             all_data.append(runner)
 
     return pd.DataFrame(all_data)
-
-if __name__ == "__main__":
-    with open("BDGOG0810form.txt", "r", encoding="utf-8") as f:
-        raw_text = f.read()
-
-    df = parse_all_races(raw_text)
-
-    if not df.empty:
-        df.to_csv("parsed_race_form.csv", index=False)
-        print("✅ All greyhound races parsed and saved to parsed_race_form.csv")
-    else:
-        print("🚫 No greyhound races detected in this file.")
