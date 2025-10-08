@@ -3,12 +3,11 @@ import pandas as pd
 from datetime import datetime
 
 def is_greyhound_race(block):
-    return any(name in block for name in ["FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ"])
+    return any(name in block for name in ["FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ", "KEEPING", "ASTON"])
 
-def extract_race_metadata(block):
+def extract_race_metadata(block, race_number):
     date_match = re.search(r"(\d{2}/\d{2}/\d{4})", block)
     track_match = re.search(r"([A-Z][a-z]+)\s+Race\s+\d+", block)
-    race_match = re.search(r"Race\s+(\d+)", block)
     distance_match = re.search(r"(\d{3,4}m)", block)
     class_match = re.search(r"Grade\s+(\d+)", block)
     weather_match = re.search(r"Weather[:\s]+(\w+)", block)
@@ -17,7 +16,7 @@ def extract_race_metadata(block):
     return {
         "RaceDate": datetime.strptime(date_match.group(1), "%d/%m/%Y").strftime("%Y-%m-%d") if date_match else "",
         "Track": track_match.group(1) if track_match else "",
-        "RaceNumber": race_match.group(1) if race_match else "",
+        "RaceNumber": str(race_number),
         "Distance": distance_match.group(1) if distance_match else "",
         "Class": class_match.group(1) if class_match else "",
         "Weather": weather_match.group(1) if weather_match else "",
@@ -43,31 +42,24 @@ def parse_all_forms(text):
     lines = text.splitlines()
     race_blocks = []
     current_block = []
-    box_count = 0
+    race_number = 0
 
     for line in lines:
-        if re.match(r"^\s*1\.\s", line):  # Start of a new race
+        if re.match(r"^\s*Race\s+\d+", line, re.IGNORECASE):
             if current_block:
-                race_blocks.append("\n".join(current_block))
+                race_blocks.append((race_number, "\n".join(current_block)))
                 current_block = []
-            box_count = 1
-        elif re.match(r"^\s*[2-9|10]\.\s", line):
-            box_count += 1
+            race_number += 1
         current_block.append(line)
 
-        if box_count >= 8:  # End of race (usually 8 runners)
-            race_blocks.append("\n".join(current_block))
-            current_block = []
-            box_count = 0
-
     if current_block:
-        race_blocks.append("\n".join(current_block))
+        race_blocks.append((race_number + 1, "\n".join(current_block)))
 
     all_data = []
-    for block in race_blocks:
+    for race_num, block in race_blocks:
         if not is_greyhound_race(block):
             continue
-        metadata = extract_race_metadata(block)
+        metadata = extract_race_metadata(block, race_num)
         runners = extract_runners(block)
         for runner in runners:
             runner.update(metadata)
