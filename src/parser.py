@@ -1,74 +1,103 @@
 import os
+import re
 import pandas as pd
-import tabula
+import pdfplumber
 from src.utils import save_df
+
 
 def parse_pdf_form(pdf_path: str) -> pd.DataFrame:
     """
-    Extracts all tables from a racing form PDF using tabula-py.
-    Returns a combined DataFrame of all detected race data.
+    Extract text-based data from Racing & Sports greyhound form PDFs.
+    Detects each dog's line (box number, name, trainer, last times, etc.)
     """
     print(f"📄 Reading PDF: {os.path.basename(pdf_path)}")
 
-    try:
-        # Extract all tables from PDF
-        tables = tabula.read_pdf(pdf_path, pages='all', multiple_tables=True, guess=True, lattice=True)
-    except Exception as e:
-        print(f"❌ Tabula error: {e}")
-        return pd.DataFrame()
+    dogs_data = []
+    current_race = None
+    track_name = os.path.splitext(os.path.basename(pdf_path))[0][:5]  # e.g., QLAKG → QLD track code
 
-    if not tables:
-        print("⚠️ No tables found in PDF.")
-        return pd.DataFrame()
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if not text:
+                continue
 
-    # Combine tables into one DataFrame
-    combined = pd.concat(tables, ignore_index=True)
-    combined = combined.dropna(how="all")
-    combined.columns = [str(c).strip().lower().replace(" ", "_") for c in combined.columns]
+            # Detect race header (e.g. "Race 3 – 520m")
+            race_match = re.search(r"Race\s*(\d+).*?(\d{3,4})m", text)
+            if race_match:
+                current_race = int(race_match.group(1))
+                distance = int(race_match.group(2))
+            else:
+                distance = None
 
-    # Try to find important columns
-    possible_cols = ["dog", "greyhound", "box", "no", "time", "distance", "place", "finish", "trainer", "split"]
-    keep_cols = [c for c in combined.columns if any(k in c for k in possible_cols)]
+            # Detect dog lines (Box No., Dog Name, Trainer, etc.)
+            lines = text.split("\n")
+            for line in lines:
+                if re.match(r"^\s*\d+\s+[A-Z].*", line):  # starts with box number + name
+                    parts = re.split(r"\s{2,}", line.strip())
+                    if len(parts) < 2:
+                        continue
 
-    if not keep_cols:
-        print("⚠️ No recognizable race columns found.")
-        return pd.DataFrame()
+                    # Try to capture dog info
+                    box_no_match = re.match(r"^\d+", parts[0])
+                    box_no = int(box_no_match.group()) if box_no_match else None
+                    dog_name = parts[0].split(" ", 1)[1] if " " in parts[0] else parts[0]
+                    trainer = None
+                    last_3 = None
 
-    clean_df = combined[keep_cols].copy()
-    clean_df.columns = [c.replace("\n", "_") for c in clean_df.columns]
+                    # Extract time (like "29.87" or "30.10")
+                    time_match = re.search(r"\b\d{2}\.\d{2}\b", line)
+                    time_val = float(time_match.group()) if time_match else None
 
-    # Add metadata
-    clean_df["source_file"] = os.path.basename(pdf_path)
-    return clean_df
+                    # Extract placing or performance keywords
+                    placing = None
+                    if "1st" in line:
+                        placing = 1
+                    elif "2nd" in line:
+                        placing = 2
+                    elif "3rd" in line:
+                        placing = 3
+
+                    dogs_data.append({
+                        "track": track_name,
+                        "race": current_race,
+                        "box": box_no,
+                        "dog": dog_name.strip(),
+                        "trainer": trainer,
+                        "time_sec": time_val,
+                        "distance": distance,
+                        "finish_pos": placing,
+                    })
+
+    df = pd.DataFrame(dogs_data)
+    if df.empty:
+        print("⚠️ No dogs detected in this form.")
+    return df
 
 
 def parse_all_forms(input_dir: str, output_dir: str) -> pd.DataFrame:
     """
-    Parse all PDF forms in input_dir and save cleaned versions to output_dir.
+    Parse all form PDFs in input_dir and save cleaned CSVs to output_dir.
     """
-    all_dfs = []
     os.makedirs(output_dir, exist_ok=True)
+    all_dfs = []
 
     for fname in os.listdir(input_dir):
-        path = os.path.join(input_dir, fname)
-        if not os.path.isfile(path) or not fname.lower().endswith(".pdf"):
+        if not fname.lower().endswith(".pdf"):
             continue
-
+        fpath = os.path.join(input_dir, fname)
         print(f"📘 Processing {fname} ...")
-        out_name = os.path.splitext(fname)[0] + "_clean.csv"
-        out_path = os.path.join(output_dir, out_name)
-
-        df = parse_pdf_form(path)
+        df = parse_pdf_form(fpath)
         if not df.empty:
-            save_df(df, out_path)
+            out_name = os.path.splitext(fname)[0] + "_clean.csv"
+            save_df(df, os.path.join(output_dir, out_name))
             all_dfs.append(df)
-            print(f"✅ Saved cleaned data to {out_path}")
+            print(f"✅ Saved cleaned data to cleaned_data/{out_name}")
         else:
             print(f"⚠️ Skipped {fname} (no usable data)")
 
     if all_dfs:
-        full_df = pd.concat(all_dfs, ignore_index=True)
-        return full_df
+        return pd.concat(all_dfs, ignore_index=True)
     else:
         print("⚠️ No valid data extracted from any form.")
         return pd.DataFrame()
