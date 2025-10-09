@@ -2,13 +2,7 @@ import re
 import pandas as pd
 from datetime import datetime
 
-def is_greyhound_race(block):
-    return any(name in block for name in [
-        "FERNANDO BALE", "ZAMBORA BROCKIE", "KOBLENZ", "KEEPING", "ASTON", "PAW"
-    ])
-
 def extract_race_metadata(block, race_number, filename):
-    # Extract date from block
     date_match = re.search(r"(\d{2}/\d{2}/\d{4})", block)
     date_str = ""
     if date_match:
@@ -17,13 +11,11 @@ def extract_race_metadata(block, race_number, filename):
         except:
             date_str = ""
 
-    # Infer track from filename
     track_match = re.match(r"([A-Z]{3,})G\d{4}", filename)
     track = track_match.group(1) if track_match else "UNKNOWN"
 
-    # Extract distance
-    distance_match = re.search(r"(\d{3,4}m)", block)
-    distance = distance_match.group(1) if distance_match else ""
+    distance_match = re.search(r"(\d{3,4})m", block)
+    distance = int(distance_match.group(1)) if distance_match else None
 
     return {
         "RaceDate": date_str,
@@ -35,18 +27,35 @@ def extract_race_metadata(block, race_number, filename):
         "Surface": ""
     }
 
-def extract_runners(block):
+def extract_runners(block, metadata):
     pattern = r"(\d+)\.\s+([A-Z][A-Za-z\s\-']+).*?Trainer[:\s]+([A-Za-z\s\-']+)"
     matches = re.findall(pattern, block, re.DOTALL)
     runners = []
     for m in matches:
+        box = int(m[0])
+        dog = m[1].strip()
+        trainer = m[2].strip()
+
+        # Simulated extraction for advanced fields (replace with real logic later)
+        last_run_time = None
+        speed_kmh = None
+        days_since_last_run = None
+        distance_specialist = False
+        track_experience_count = 0
+
         runners.append({
-            "DogName": m[1].strip(),
-            "Box": int(m[0]),
-            "Trainer": m[2].strip(),
+            "DogName": dog,
+            "Box": box,
+            "Trainer": trainer,
             "PrizeMoney": None,
             "WinRate": None,
-            "PlaceRate": None
+            "PlaceRate": None,
+            "LastRunTime": last_run_time,
+            "SpeedKMH": speed_kmh,
+            "DaysSinceLastRun": days_since_last_run,
+            "DistanceSpecialist": distance_specialist,
+            "TrackExperienceCount": track_experience_count,
+            **metadata
         })
     return runners
 
@@ -80,12 +89,8 @@ def parse_all_forms(text, filename="UNKNOWN"):
 
     all_data = []
     for race_num, block in race_blocks:
-        if not is_greyhound_race(block):
-            continue
         metadata = extract_race_metadata(block, race_num, filename)
-        runners = extract_runners(block)
-        for runner in runners:
-            runner.update(metadata)
-            all_data.append(runner)
+        runners = extract_runners(block, metadata)
+        all_data.extend(runners)
 
     return pd.DataFrame(all_data)
