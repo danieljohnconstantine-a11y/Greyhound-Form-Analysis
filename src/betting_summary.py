@@ -1,23 +1,23 @@
 import pandas as pd
 
-def generate_betting_summary(winners_path, output_path):
-    df = pd.read_csv(winners_path)
+def generate_betting_summary(ranked_path, output_path, score_threshold=5):
+    df = pd.read_csv(ranked_path)
 
-    # Fill missing values
-    df["Track"] = df["Track"].fillna("UNKNOWN")
-    df["RaceDate"] = df["RaceDate"].fillna("UNKNOWN")
-    df["Distance"] = df["Distance"].fillna("UNKNOWN")
-    df["RaceNumber"] = df["RaceNumber"].fillna("UNKNOWN")
+    # Filter high-confidence picks
+    picks = df[df["Score"] >= score_threshold]
+
+    # Sort by RaceDate, Track, RaceNumber
+    picks = picks.sort_values(by=["RaceDate", "Track", "RaceNumber"])
 
     # Format summary
-    df["Summary"] = df.apply(
-        lambda row: f"Race {row['RaceNumber']} - {row['DogName']} - {row['Track']} - {row['Distance']} - {row['RaceDate']}",
-        axis=1
-    )
+    summary = []
+    for _, row in picks.iterrows():
+        line = f"Race {row['RaceNumber']} - {row['DogName']} - {row['Track']} - {row['Distance']}m - {row['RaceDate']}"
+        summary.append(line)
 
     # Save to file
-    df[["Summary"]].to_csv(output_path, index=False)
-    print(f"📋 Betting summary saved to: {output_path}")
+    pd.DataFrame({"Summary": summary}).to_csv(output_path, index=False)
+    print(f"✅ Betting summary saved to: {output_path}")
 
 if __name__ == "__main__":
-    generate_betting_summary("outputs/winners.csv", "outputs/betting_summary.csv")
+    generate_betting_summary("outputs/ranked.csv", "outputs/betting_summary.csv")
