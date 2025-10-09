@@ -36,12 +36,26 @@ def extract_runners(block, metadata):
         dog = m[1].strip()
         trainer = m[2].strip()
 
-        # Simulated extraction for advanced fields (replace with real logic later)
-        last_run_time = None
-        speed_kmh = None
-        days_since_last_run = None
-        distance_specialist = False
-        track_experience_count = 0
+        # Simulated last run date and time (replace with real extraction logic)
+        last_run_date = "2025-10-03"
+        last_run_time = 24.5  # seconds
+
+        # Compute derived features
+        try:
+            race_date = datetime.strptime(metadata["RaceDate"], "%Y-%m-%d")
+            last_date = datetime.strptime(last_run_date, "%Y-%m-%d")
+            days_since_last_run = (race_date - last_date).days
+        except:
+            days_since_last_run = None
+
+        try:
+            speed_kmh = round(metadata["Distance"] / last_run_time * 3.6, 2) if metadata["Distance"] and last_run_time else None
+        except:
+            speed_kmh = None
+
+        # Simulated specialist and experience flags
+        distance_specialist = True if metadata["Distance"] and metadata["Distance"] in [300, 400, 450] else False
+        track_experience_count = 2 if metadata["Track"] in ["MEAD", "GAWL", "MTG"] else 0
 
         runners.append({
             "DogName": dog,
@@ -50,9 +64,10 @@ def extract_runners(block, metadata):
             "PrizeMoney": None,
             "WinRate": None,
             "PlaceRate": None,
+            "LastRunDate": last_run_date,
             "LastRunTime": last_run_time,
-            "SpeedKMH": speed_kmh,
             "DaysSinceLastRun": days_since_last_run,
+            "SpeedKMH": speed_kmh,
             "DistanceSpecialist": distance_specialist,
             "TrackExperienceCount": track_experience_count,
             **metadata
