@@ -12,9 +12,10 @@ def main():
     print("🚀 Starting Greyhound Analysis for today...")
 
     # === Step 1: Convert latest PDF to text ===
-    form_path = convert_latest_pdf_to_text("forms")
+    # ✅ Changed from "forms" → "data" so it uses your existing folder
+    form_path = convert_latest_pdf_to_text("data")
     if not form_path:
-        print("❌ No form file found. Exiting.")
+        print("❌ No form file found in data/. Exiting.")
         return
 
     # === Step 2: Parse the form ===
@@ -39,14 +40,17 @@ def main():
 
     # Merge with ranked data to get full details
     ranked = pd.read_csv("outputs/ranked.csv")
-    betting_df = pd.merge(matched, ranked, on=["DogName", "RaceDate", "Track", "RaceNumber"])
+    betting_df = pd.merge(matched, ranked, on=["DogName", "RaceDate", "Track", "RaceNumber"], how="inner")
     betting_df.to_csv("outputs/betting_summary.csv", index=False)
     print("✅ Betting summary saved to outputs/betting_summary.csv")
 
     # === Step 6: Print betting picks ===
     print("\n📋 Today's Betting Picks:")
-    for _, row in betting_df.iterrows():
-        print(f"Race {row['RaceNumber']} - {row['DogName']} - {row['Track']} - {row['Distance']}m - Score: {row['Score']}")
+    if betting_df.empty:
+        print("⚠️ No matched picks found.")
+    else:
+        for _, row in betting_df.iterrows():
+            print(f"Race {row['RaceNumber']} - {row['DogName']} - {row['Track']} - {row['Distance']}m - Score: {row['Score']}")
 
 if __name__ == "__main__":
     main()
