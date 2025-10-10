@@ -7,13 +7,14 @@ from src.parser import parse_all_forms
 from src.features import build_features
 from src.validate_picks import validate_picks
 
-def convert_pdf_to_text(pdf_filename, forms_folder="forms"):
-    # Ensure forms folder exists
-    if not os.path.exists(forms_folder):
-        os.makedirs(forms_folder)
-        print(f"📁 Created missing folder: {forms_folder}")
+def convert_pdf_to_text(pdf_filename, source_folder="data"):
+    # Ensure source folder exists
+    if not os.path.exists(source_folder):
+        os.makedirs(source_folder)
+        print(f"📁 Created missing folder: {source_folder}")
+        return None
 
-    pdf_path = os.path.join(forms_folder, pdf_filename)
+    pdf_path = os.path.join(source_folder, pdf_filename)
     txt_path = pdf_path.replace(".pdf", ".txt")
 
     if not os.path.exists(pdf_path):
@@ -32,11 +33,11 @@ def convert_pdf_to_text(pdf_filename, forms_folder="forms"):
 def main():
     print("🚀 Starting Greyhound Analysis for today...")
 
-    # === Step 1: Convert known PDF to text ===
-    pdf_filename = "QLAKG1010form.pdf"  # Change this to your actual file
-    form_path = convert_pdf_to_text(pdf_filename)
+    # === Step 1: Choose your race form PDF ===
+    pdf_filename = "QLAKG1010form.pdf"  # ✅ Change this to any file in data/
+    form_path = convert_pdf_to_text(pdf_filename, source_folder="data")
     if not form_path:
-        print("⚠️ Please place the correct PDF in the forms/ folder and try again.")
+        print("⚠️ Please place the correct PDF in the data/ folder and try again.")
         return
 
     # === Step 2: Parse the form ===
