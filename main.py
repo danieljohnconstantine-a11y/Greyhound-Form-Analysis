@@ -2,29 +2,38 @@ import pandas as pd
 from datetime import datetime
 
 # Import modules from src
+from src.pdf_to_text import convert_latest_pdf_to_text
 from src.parser import parse_all_forms
 from src.features import build_features
 from src.validate_picks import validate_picks
 from src.betting_summary import generate_betting_summary
 
 def main():
-    # === Step 1: Parse today's form ===
-    with open("forms/BDGOG1010form.txt", "r", encoding="utf-8") as f:
+    print("🚀 Starting Greyhound Analysis for today...")
+
+    # === Step 1: Convert latest PDF to text ===
+    form_path = convert_latest_pdf_to_text("forms")
+    if not form_path:
+        print("❌ No form file found. Exiting.")
+        return
+
+    # === Step 2: Parse the form ===
+    with open(form_path, "r", encoding="utf-8") as f:
         raw_text = f.read()
 
-    parsed_df = parse_all_forms(raw_text, filename="BDGOG1010form.txt")
+    parsed_df = parse_all_forms(raw_text, filename=form_path)
     parsed_df.to_csv("outputs/todays_form.csv", index=False)
     print("✅ Parsed form saved to outputs/todays_form.csv")
 
-    # === Step 2: Score features ===
+    # === Step 3: Score features ===
     ranked_df = build_features(parsed_df)
     ranked_df.to_csv("outputs/ranked.csv", index=False)
     print("✅ Ranked data saved to outputs/ranked.csv")
 
-    # === Step 3: Validate picks ===
+    # === Step 4: Validate picks ===
     validate_picks("outputs/ranked.csv", "outputs/todays_form.csv", "outputs/validation.csv")
 
-    # === Step 4: Filter matched picks ===
+    # === Step 5: Filter matched picks ===
     validation = pd.read_csv("outputs/validation.csv")
     matched = validation[validation["FoundInRaceField"] == "Yes"]
 
@@ -34,7 +43,7 @@ def main():
     betting_df.to_csv("outputs/betting_summary.csv", index=False)
     print("✅ Betting summary saved to outputs/betting_summary.csv")
 
-    # === Step 5: Optional betting summary printout ===
+    # === Step 6: Print betting picks ===
     print("\n📋 Today's Betting Picks:")
     for _, row in betting_df.iterrows():
         print(f"Race {row['RaceNumber']} - {row['DogName']} - {row['Track']} - {row['Distance']}m - Score: {row['Score']}")
