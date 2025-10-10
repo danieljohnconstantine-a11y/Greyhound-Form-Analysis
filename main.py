@@ -13,7 +13,7 @@ def main():
     # === Step 1: Convert latest PDF to text ===
     form_path = convert_latest_pdf_to_text("forms")
     if not form_path:
-        print("❌ No form file found. Exiting.")
+        print("⚠️ No PDF found. Please add one to the forms/ folder.")
         return
 
     # === Step 2: Parse the form ===
@@ -22,14 +22,14 @@ def main():
 
     parsed_df = parse_all_forms(raw_text, filename=form_path)
     parsed_df.to_csv("outputs/todays_form.csv", index=False)
-    print("✅ Parsed form saved to outputs/todays_form.csv")
+    print("✅ Parsed race form saved to outputs/todays_form.csv")
 
     # === Step 3: Score features ===
     ranked_df = build_features(parsed_df)
     ranked_df.to_csv("outputs/ranked.csv", index=False)
     print("✅ Ranked data saved to outputs/ranked.csv")
 
-    # === Step 4: Filter top picks ===
+    # === Step 4: Select winners ===
     winners_df = ranked_df[ranked_df["WinScore"] > 0]  # or use Score threshold
     winners_df.to_csv("outputs/winners.csv", index=False)
     print("✅ Winners saved to outputs/winners.csv")
@@ -44,8 +44,7 @@ def main():
         return
 
     matched = validation[validation["FoundInRaceField"] == "Yes"]
-    ranked = pd.read_csv("outputs/ranked.csv")
-    betting_df = pd.merge(matched, ranked, on=["DogName", "RaceDate", "Track", "RaceNumber"])
+    betting_df = pd.merge(matched, ranked_df, on=["DogName", "RaceDate", "Track", "RaceNumber"])
     betting_df.to_csv("outputs/betting_summary.csv", index=False)
     print("✅ Betting summary saved to outputs/betting_summary.csv")
 
