@@ -2,10 +2,17 @@ import os
 import pdfplumber
 
 def convert_latest_pdf_to_text(forms_folder="forms"):
-    # Find the most recent PDF file in the forms folder
+    # Create the folder if it doesn't exist
+    if not os.path.exists(forms_folder):
+        os.makedirs(forms_folder)
+        print(f"📁 Created missing folder: {forms_folder}")
+        print("⚠️ No PDFs found yet. Add a race form to continue.")
+        return None
+
+    # Find the most recent PDF file
     pdf_files = [f for f in os.listdir(forms_folder) if f.lower().endswith(".pdf")]
     if not pdf_files:
-        print("❌ No PDF files found in forms/")
+        print("⚠️ No PDF files found in forms/. Please add a race form.")
         return None
 
     latest_pdf = max(pdf_files, key=lambda f: os.path.getmtime(os.path.join(forms_folder, f)))
