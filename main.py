@@ -1,13 +1,18 @@
 import os
 import pandas as pd
 from datetime import datetime
+import pdfplumber
+
 from src.parser import parse_all_forms
 from src.features import build_features
 from src.validate_picks import validate_picks
-import pdfplumber
 
-def convert_pdf_to_text(pdf_filename):
-    forms_folder = "forms"
+def convert_pdf_to_text(pdf_filename, forms_folder="forms"):
+    # Ensure forms folder exists
+    if not os.path.exists(forms_folder):
+        os.makedirs(forms_folder)
+        print(f"📁 Created missing folder: {forms_folder}")
+
     pdf_path = os.path.join(forms_folder, pdf_filename)
     txt_path = pdf_path.replace(".pdf", ".txt")
 
@@ -28,9 +33,10 @@ def main():
     print("🚀 Starting Greyhound Analysis for today...")
 
     # === Step 1: Convert known PDF to text ===
-    pdf_filename = "QLAKG1010form.pdf"  # Change this to the file you want to use
+    pdf_filename = "QLAKG1010form.pdf"  # Change this to your actual file
     form_path = convert_pdf_to_text(pdf_filename)
     if not form_path:
+        print("⚠️ Please place the correct PDF in the forms/ folder and try again.")
         return
 
     # === Step 2: Parse the form ===
