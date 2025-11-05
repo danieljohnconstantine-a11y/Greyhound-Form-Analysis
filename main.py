@@ -1,81 +1,75 @@
-import os
 import pandas as pd
-from datetime import datetime
+import numpy as np
 import pdfplumber
+import os
+from src.parser import parse_race_form
+from src.features import compute_features  # ✅ Enhanced scoring logic
 
-from src.parser import parse_all_forms
-from src.features import build_features
-from src.validate_picks import validate_picks
-
-def convert_pdf_to_text(pdf_filename, source_folder="data"):
-    # Ensure source folder exists
-    if not os.path.exists(source_folder):
-        os.makedirs(source_folder)
-        print(f"📁 Created missing folder: {source_folder}")
-        return None
-
-    pdf_path = os.path.join(source_folder, pdf_filename)
-    txt_path = pdf_path.replace(".pdf", ".txt")
-
-    if not os.path.exists(pdf_path):
-        print(f"❌ PDF not found: {pdf_path}")
-        return None
-
+def extract_text_from_pdf(pdf_path):
+    text = ""
     with pdfplumber.open(pdf_path) as pdf:
-        text = "\n".join(page.extract_text() for page in pdf.pages if page.extract_text())
+        for page in pdf.pages:
+            text += page.extract_text() + "\n"
+    return text
 
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(text)
+# 🚀 Start pipeline
+print("🚀 Starting Greyhound Analytics")
 
-    print(f"✅ Converted {pdf_filename} to {os.path.basename(txt_path)}")
-    return txt_path
+# ✅ Find all PDFs in data folder
+pdf_folder = "data"
+pdf_files = [f for f in os.listdir(pdf_folder) if f.lower().endswith(".pdf")]
+pdf_files.sort(key=lambda x: os.path.getmtime(os.path.join(pdf_folder, x)), reverse=True)
 
-def main():
-    print("🚀 Starting Greyhound Analysis for today...")
+if not pdf_files:
+    print("❌ No PDF files found in data folder.")
+    exit()
 
-    # === Step 1: Choose your race form PDF ===
-    pdf_filename = "QLAKG1010form.pdf"  # ✅ Change this to any file in data/
-    form_path = convert_pdf_to_text(pdf_filename, source_folder="data")
-    if not form_path:
-        print("⚠️ Please place the correct PDF in the data/ folder and try again.")
-        return
+all_dogs = []
 
-    # === Step 2: Parse the form ===
-    with open(form_path, "r", encoding="utf-8") as f:
-        raw_text = f.read()
+# ✅ Process each PDF
+for pdf_file in pdf_files:
+    pdf_path = os.path.join(pdf_folder, pdf_file)
+    print(f"📄 Processing: {pdf_path}")
+    raw_text = extract_text_from_pdf(pdf_path)
+    df = parse_race_form(raw_text)
 
-    parsed_df = parse_all_forms(raw_text, filename=form_path)
-    parsed_df.to_csv("outputs/todays_form.csv", index=False)
-    print("✅ Parsed race form saved to outputs/todays_form.csv")
+    # ✅ Convert DLR to numeric to avoid type errors
+    df["DLR"] = pd.to_numeric(df["DLR"], errors="coerce")
 
-    # === Step 3: Score features ===
-    ranked_df = build_features(parsed_df)
-    ranked_df.to_csv("outputs/ranked.csv", index=False)
-    print("✅ Ranked data saved to outputs/ranked.csv")
+    # ✅ Apply enhanced scoring
+    df = compute_features(df)
+    all_dogs.append(df)
 
-    # === Step 4: Select winners ===
-    winners_df = ranked_df[ranked_df["WinScore"] > 0]
-    winners_df.to_csv("outputs/winners.csv", index=False)
-    print("✅ Winners saved to outputs/winners.csv")
+# ✅ Combine all dogs
+combined_df = pd.concat(all_dogs, ignore_index=True)
+print(f"🐾 Total dogs parsed: {len(combined_df)}")
 
-    # === Step 5: Validate picks ===
-    validate_picks("outputs/winners.csv", "outputs/todays_form.csv", "outputs/validation.csv")
+# ✅ Save full parsed form
+combined_df.to_csv("outputs/todays_form.csv", index=False)
+print("📄 Saved parsed form → outputs/todays_form.csv")
 
-    # === Step 6: Filter matched picks ===
-    validation = pd.read_csv("outputs/validation.csv")
-    if validation.empty:
-        print("⚠️ No matching dogs found for today's races.")
-        return
+# ✅ Save ranked dogs
+ranked = combined_df.sort_values(["Track", "RaceNumber", "FinalScore"], ascending=[True, True, False])
+ranked.to_csv("outputs/ranked.csv", index=False)
+print("📊 Saved ranked dogs → outputs/ranked.csv")
 
-    matched = validation[validation["FoundInRaceField"] == "Yes"]
-    betting_df = pd.merge(matched, ranked_df, on=["DogName", "RaceDate", "Track", "RaceNumber"])
-    betting_df.to_csv("outputs/betting_summary.csv", index=False)
-    print("✅ Betting summary saved to outputs/betting_summary.csv")
+# ✅ Save top picks across all tracks
+picks = ranked.groupby(["Track", "RaceNumber"]).head(1).reset_index(drop=True)
+picks = picks.sort_values("FinalScore", ascending=False)
 
-    # === Step 7: Print betting picks ===
-    print("\n📋 Today's Betting Picks:")
-    for _, row in betting_df.iterrows():
-        print(f"Race {row['RaceNumber']} - {row['DogName']} - {row['Track']} - {row['Distance']}m - Score: {row['Score']}")
+# Reorder columns
+priority_cols = ["Track", "RaceNumber", "Box", "DogName", "FinalScore", "PrizeMoney"]
+remaining_cols = [col for col in picks.columns if col not in priority_cols]
+ordered_cols = priority_cols + remaining_cols
+picks = picks[ordered_cols]
 
-if __name__ == "__main__":
-    main()
+picks.to_csv("outputs/picks.csv", index=False)
+print("🎯 Saved top picks → outputs/picks.csv")
+
+# ✅ Display top picks
+print("\n🏁 Top Picks Across All Tracks:")
+for _, row in picks.iterrows():
+    print(f"{row.Track} | Race {row.RaceNumber} | {row.DogName} | Score: {round(row.FinalScore, 3)}")
+
+print("\n📌 Press Enter to exit...")
+input()
