@@ -198,7 +198,14 @@ def _compile_block_patterns(name: str):
     # Match from dog name to either:
     # - Next dog name pattern: uppercase word(s) on own line followed by j50s/j350s pattern
     # - End of text
-    # Use negative lookahead to not consume the next dog's name
+    # Use positive lookahead to not consume the next dog's name
+    # Pattern breakdown:
+    #   (?=                        - positive lookahead (doesn't consume)
+    #      \n[A-Z][A-Z0-9' \-]+    - newline + uppercase dog name (letters, numbers, apostrophes, spaces, hyphens)
+    #      \s*\n\s*                - optional whitespace, newline, optional whitespace
+    #      j\d+s\s+j\d+s           - trainer stats pattern like "j50s j350s" (jockey 50 starts, etc.)
+    #      |\Z                     - OR end of string
+    #   )
     next_dog_pattern = r"(?=\n[A-Z][A-Z0-9' \-]+\s*\n\s*j\d+s\s+j\d+s|\Z)"
     
     return [
@@ -258,12 +265,20 @@ def _find_block(full_text: str, name: str, all_names_upper):
     
     return None
 
-# Regex rules
+# Regex rules for extracting specific fields from dog detail blocks
 _FIELD_RX = {
+    # Extract colour, age, and sex from pattern like "0kg (1) bdl 1 D" or "0 kg (2) bl 1 B"
     "colour_sex_age": re.compile(r"0\s*kg\s*\(?\d+\)?\s*([a-z/]+)\s+(\d+)\s+([DB])", re.I),
+    
+    # Extract sire and dam from pattern like "SIRE NAME (AUS) - DAM NAME (AUS) J/T:"
+    # Uses non-greedy match and stops at J/T:, newline, or end of string
     "sire_dam": re.compile(r"([A-Z][A-Za-z0-9' ()]+)\s*-\s*([A-Z][A-Za-z0-9' ()]+?)(?:\s+J/T:|\s*\n|$)"),
+    
     "raced_distance": re.compile(r"Raced\s*Distance:\s*([\d\-]+)", re.I),
     "winning_distance": re.compile(r"Winning\s*Distance:\s*([A-Za-z0-9]+)", re.I),
+    
+    # Extract owner name, stopping at newline, CarPM/s (next section), Dog:, Trainer:, or end
+    # Uses lookahead to not consume the boundary marker
     "owner": re.compile(r"Owner:\s*(.+?)(?=\s*(?:\n|CarPM/s|Dog:|Trainer:|$))", re.I),
     "dog_record": re.compile(r"(?:Dog|Horse):\s*(\d+-\d+-\d+)\s+(\d+%)\s*-\s*(\d+%)", re.I),
     "trainer_stats": re.compile(r"J/T:\s.*?(\d+-\d+-\d+)\s+(\d+%-\d+%)", re.I),
