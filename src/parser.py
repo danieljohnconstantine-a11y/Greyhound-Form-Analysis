@@ -13,6 +13,11 @@
 
 import re
 import pandas as pd
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 # ---------- Optional: fuzzy matcher (rapidfuzz). If unavailable, fall back gracefully ----------
 try:
@@ -20,6 +25,7 @@ try:
     _FUZZY_OK = True
 except Exception:
     _FUZZY_OK = False
+    logger.warning("rapidfuzz not available - fuzzy matching disabled")
 
 
 # =========================================
@@ -50,9 +56,26 @@ def _normalize_track(track_raw: str) -> str:
 
 def parse_race_form(text: str) -> pd.DataFrame:
     """
-    Phase 1: Parse header table block (your original flow, but tolerant).
-    Returns a DataFrame of dogs with race info (RaceNumber/Track/Distance…).
-    Then calls Section 2 enricher to add dog-level details.
+    Parse greyhound race form text into a structured DataFrame.
+    
+    This function performs two-phase parsing:
+    
+    Phase 1: Extract race headers and basic dog info from tabular section
+    - Parses race number, time, track, distance from header lines
+    - Extracts box, name, trainer, career stats from dog rows
+    - Handles missing race numbers with auto-numbering fallback
+    
+    Phase 2: Enrich with detailed dog information from Section 2
+    - Extracts breeding (sire/dam), owner, performance metrics
+    - Captures recent race history for each dog
+    - All extraction errors are handled gracefully
+    
+    Args:
+        text: Raw text extracted from greyhound racing form PDF/document
+        
+    Returns:
+        DataFrame with one row per dog, containing all available fields.
+        Missing fields are set to None rather than causing errors.
     """
     lines = text.splitlines()
     dogs = []
@@ -138,7 +161,8 @@ def parse_race_form(text: str) -> pd.DataFrame:
     # Phase 2: Section 2 enrichment
     df = _enrich_section2(df, text, debug=False)
 
-    print(f"✅ Parsed {len(df)} dogs (with {(df.get('Owner').notna().sum() if 'Owner' in df.columns else 0)} enriched).")
+    enriched = df.get('Owner').notna().sum() if 'Owner' in df.columns else 0
+    logger.info(f"✅ Parsed {len(df)} dogs total ({enriched} with enriched details)")
     return df
 
 
@@ -160,25 +184,42 @@ def _norm(txt: str) -> str:
     t = re.sub(r"\n[ \t]+", "\n", t)
     t = t.replace("–", "-").replace("—", "-").replace("’", "'").replace("‘", "'")
     t = t.replace(" Kg", " kg").replace("KG", "kg")
-    return re.sub(r"\s+", " ", t)
+    # Collapse multiple consecutive newlines to max 2 (preserve line breaks!)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t
 
 # Multi-anchor + fuzzy block finding
 def _compile_block_patterns(name: str):
+    """
+    Create regex patterns to extract a single dog's detail block.
+    The pattern must stop at the next dog's name (uppercase line followed by j50s/j350s).
+    """
     esc = re.escape(name)
+    # Match from dog name to either:
+    # - Next dog name pattern: uppercase word(s) on own line followed by j50s/j350s pattern
+    # - End of text
+    # Use negative lookahead to not consume the next dog's name
+    next_dog_pattern = r"(?=\n[A-Z][A-Z0-9' \-]+\s*\n\s*j\d+s\s+j\d+s|\Z)"
+    
     return [
-        re.compile(rf"{esc}\s+(?:0\s*kg|0kg)[^\n]*?\(\d+\)(.+?)(?=(?:\n?\d+\.\s+[A-Z]|$))", re.I | re.S),
-        re.compile(rf"{esc}\s+.*?\(\d+\)(.+?)(?=(?:\n?\d+\.\s+[A-Z]|$))", re.I | re.S),
-        re.compile(rf"{esc}(?:\s+\d+)?\s+.*?(?=(?:\n?\d+\.\s+[A-Z]|$))", re.I | re.S),
+        # Pattern 1: Dog name followed by content until next dog or end
+        re.compile(rf"^{esc}\s*$.*?{next_dog_pattern}", re.M | re.S),
+        # Pattern 2: More flexible - just find the name and grab content
+        re.compile(rf"{esc}.*?{next_dog_pattern}", re.S),
     ]
 
 def _find_block(full_text: str, name: str, all_names_upper):
-    # Exact patterns
+    """
+    Find and extract a single dog's detail block from the full text.
+    Returns only the content for this specific dog, stopping at the next dog's section.
+    """
+    # Try exact patterns first
     for pat in _compile_block_patterns(name):
         m = pat.search(full_text)
         if m:
-            return m.group(1)
+            return m.group(0)
 
-    # Fuzzy (if available)
+    # Fuzzy matching (if available)
     if _FUZZY_OK:
         candidates = re.findall(r"[A-Z][A-Z0-9' \-]{2,}", full_text)
         best = None
@@ -189,28 +230,41 @@ def _find_block(full_text: str, name: str, all_names_upper):
                 best_score = sc
                 best = c
         if best and best_score > 80:
-            esc = re.escape(best)
             for pat in _compile_block_patterns(best):
                 m = pat.search(full_text)
                 if m:
-                    return m.group(1)
+                    return m.group(0)
 
-    # Sliding window fallback
+    # Sliding window fallback with better boundary detection
     i = full_text.find(name)
     if i != -1:
-        window = full_text[i:i+4000]
-        parts = re.split(r"\n?\d+\.\s+[A-Z]", window)
-        if parts:
-            return parts[0]
+        # Find start of this dog's section (should be at a line start)
+        start = full_text.rfind('\n', max(0, i-10), i)
+        if start == -1:
+            start = 0
+        else:
+            start += 1  # Move past the newline
+        
+        # Look for next dog section: uppercase name followed by j50s pattern
+        window = full_text[start:]
+        # Find the end: next occurrence of pattern "DOGNAME\nj50s j350s" after current position
+        next_dog = re.search(r'\n([A-Z][A-Z0-9\' \-]+)\s*\nj\d+s\s+j\d+s', window[len(name)+10:])
+        if next_dog:
+            end = start + len(name) + 10 + next_dog.start()
+            return full_text[start:end]
+        else:
+            # No next dog found, take rest of text (up to reasonable limit)
+            return window[:4000]
+    
     return None
 
 # Regex rules
 _FIELD_RX = {
     "colour_sex_age": re.compile(r"0\s*kg\s*\(?\d+\)?\s*([a-z/]+)\s+(\d+)\s+([DB])", re.I),
-    "sire_dam": re.compile(r"([A-Z][A-Za-z0-9' ()]+)\s*-\s*([A-Z][A-Za-z0-9' ()]+)"),
+    "sire_dam": re.compile(r"([A-Z][A-Za-z0-9' ()]+)\s*-\s*([A-Z][A-Za-z0-9' ()]+?)(?:\s+J/T:|\s*\n|$)"),
     "raced_distance": re.compile(r"Raced\s*Distance:\s*([\d\-]+)", re.I),
     "winning_distance": re.compile(r"Winning\s*Distance:\s*([A-Za-z0-9]+)", re.I),
-    "owner": re.compile(r"Owner:\s*(.+?)(?=\s(?:Dog:|Trainer:|$))", re.I | re.S),
+    "owner": re.compile(r"Owner:\s*(.+?)(?=\s*(?:\n|CarPM/s|Dog:|Trainer:|$))", re.I),
     "dog_record": re.compile(r"(?:Dog|Horse):\s*(\d+-\d+-\d+)\s+(\d+%)\s*-\s*(\d+%)", re.I),
     "trainer_stats": re.compile(r"J/T:\s.*?(\d+-\d+-\d+)\s+(\d+%-\d+%)", re.I),
     "api": re.compile(r"\bAPI\b\s+([\d.]+)", re.I),
@@ -300,22 +354,41 @@ _RUN_LINE = re.compile(
 )
 
 def _extract_recent_runs(block: str):
+    """
+    Extract recent race results from a dog's detail block.
+    Tolerates malformed lines and continues parsing even if some results are invalid.
+    """
     runs = []
-    candidates = re.split(r"(?=(?:\d{1,2}(?:st|nd|rd|th)\s+of\s+\d+))", block)
-    for cand in candidates:
-        cand = cand.strip()
-        if not cand:
-            continue
-        m = _RUN_LINE.search(cand)
-        if not m:
-            continue
-        d = m.groupdict()
-        if d.get("prize"):
-            d["prize"] = d["prize"].replace(",", "")
-        runs.append(d)
+    try:
+        candidates = re.split(r"(?=(?:\d{1,2}(?:st|nd|rd|th)\s+of\s+\d+))", block)
+        for cand in candidates:
+            cand = cand.strip()
+            if not cand:
+                continue
+            try:
+                m = _RUN_LINE.search(cand)
+                if not m:
+                    continue
+                d = m.groupdict()
+                # Clean up prize field if present
+                if d.get("prize"):
+                    d["prize"] = d["prize"].replace(",", "")
+                runs.append(d)
+            except Exception as e:
+                # Log but don't crash on malformed race result line
+                logger.debug(f"Failed to parse race result line: {e}")
+                continue
+    except Exception as e:
+        logger.warning(f"Error extracting recent runs: {e}")
+    
     return runs
 
 def _extract_fields(block: str):
+    """
+    Extract all dog detail fields from a block of text.
+    Handles missing or malformed fields gracefully - returns None for missing values.
+    All extraction failures are logged but do not stop processing.
+    """
     out = {
         "Colour": None, "Sex": None, "Age": None,
         "Sire": None, "Dam": None,
@@ -331,57 +404,112 @@ def _extract_fields(block: str):
         "RecentRuns": None,
     }
 
-    m = _FIELD_RX["colour_sex_age"].search(block)
-    if m:
-        out["Colour"] = m.group(1).lower()
-        out["Age"] = m.group(2)
-        out["Sex"] = "Dog" if m.group(3).upper() == "D" else "Bitch"
+    # Extract colour, sex, age with error handling
+    try:
+        m = _FIELD_RX["colour_sex_age"].search(block)
+        if m:
+            out["Colour"] = m.group(1).lower()
+            out["Age"] = m.group(2)
+            out["Sex"] = "Dog" if m.group(3).upper() == "D" else "Bitch"
+    except Exception as e:
+        logger.debug(f"Failed to extract colour/sex/age: {e}")
 
-    m = _FIELD_RX["sire_dam"].search(block)
-    if m:
-        out["Sire"] = m.group(1).strip()
-        out["Dam"] = m.group(2).strip()
+    # Extract sire and dam
+    try:
+        m = _FIELD_RX["sire_dam"].search(block)
+        if m:
+            out["Sire"] = m.group(1).strip()
+            out["Dam"] = m.group(2).strip()
+    except Exception as e:
+        logger.debug(f"Failed to extract sire/dam: {e}")
 
-    m = _FIELD_RX["raced_distance"].search(block);   out["RacedDistance"]   = m.group(1) if m else None
-    m = _FIELD_RX["winning_distance"].search(block); out["WinningDistance"] = m.group(1) if m else None
+    # Extract distance fields
+    try:
+        m = _FIELD_RX["raced_distance"].search(block)
+        out["RacedDistance"] = m.group(1) if m else None
+    except Exception as e:
+        logger.debug(f"Failed to extract raced distance: {e}")
+    
+    try:
+        m = _FIELD_RX["winning_distance"].search(block)
+        out["WinningDistance"] = m.group(1) if m else None
+    except Exception as e:
+        logger.debug(f"Failed to extract winning distance: {e}")
 
-    m = _FIELD_RX["owner"].search(block)
-    if m:
-        out["Owner"] = re.sub(r"\s+", " ", m.group(1)).strip()
+    # Extract owner
+    try:
+        m = _FIELD_RX["owner"].search(block)
+        if m:
+            out["Owner"] = re.sub(r"\s+", " ", m.group(1)).strip()
+    except Exception as e:
+        logger.debug(f"Failed to extract owner: {e}")
 
-    m = _FIELD_RX["dog_record"].search(block)
-    if m:
-        out["DogRecord"], out["WinPercent"], out["PlacePercent"] = m.group(1), m.group(2), m.group(3)
+    # Extract dog record stats
+    try:
+        m = _FIELD_RX["dog_record"].search(block)
+        if m:
+            out["DogRecord"], out["WinPercent"], out["PlacePercent"] = m.group(1), m.group(2), m.group(3)
+    except Exception as e:
+        logger.debug(f"Failed to extract dog record: {e}")
 
-    m = _FIELD_RX["trainer_stats"].search(block)
-    if m:
-        out["Trainer50"], out["Trainer350"] = m.group(1), m.group(2)
+    # Extract trainer stats
+    try:
+        m = _FIELD_RX["trainer_stats"].search(block)
+        if m:
+            out["Trainer50"], out["Trainer350"] = m.group(1), m.group(2)
+    except Exception as e:
+        logger.debug(f"Failed to extract trainer stats: {e}")
 
-    m = _FIELD_RX["api"].search(block);     out["API"]     = m.group(1) if m else None
-    m = _FIELD_RX["carpm"].search(block);   out["CarPM/s"] = m.group(1).replace(",", "") if m else None
-    m = _FIELD_RX["pm12"].search(block);    out["12mPM/s"] = m.group(1) if m else None
-    m = _FIELD_RX["rtc_km"].search(block);  out["RTC/km"]  = m.group(1) if m else None
-    m = _FIELD_RX["rdisttc"].search(block); out["RDistTC"] = m.group(1) if m else None
-    m = _FIELD_RX["dls"].search(block);     out["DLS"]     = m.group(1) if m else None
-    m = _FIELD_RX["dlw"].search(block);     out["DLW"]     = m.group(1) if m else None
-    m = _FIELD_RX["dod"].search(block);     out["DOD"]     = m.group(1) if m else None
+    # Extract numeric fields with individual error handling
+    field_mappings = [
+        ("api", "API"),
+        ("carpm", "CarPM/s"),
+        ("pm12", "12mPM/s"),
+        ("rtc_km", "RTC/km"),
+        ("rdisttc", "RDistTC"),
+        ("dls", "DLS"),
+        ("dlw", "DLW"),
+        ("dod", "DOD"),
+    ]
+    
+    for key, col in field_mappings:
+        try:
+            m = _FIELD_RX[key].search(block)
+            if m:
+                val = m.group(1)
+                # Remove commas from numeric values
+                if key in ["carpm"] and val:
+                    val = val.replace(",", "")
+                out[col] = val
+        except Exception as e:
+            logger.debug(f"Failed to extract {col}: {e}")
 
+    # Extract grade fields
     for key, col in [("grade_G1","G1"),("grade_G2","G2"),("grade_G3","G3"),
                      ("grade_LR","LR"),("grade_FU","FU"),("grade_2U","2U"),("grade_3U","3U")]:
-        m = _FIELD_RX[key].search(block)
-        if m:
-            out[col] = m.group(1)
+        try:
+            m = _FIELD_RX[key].search(block)
+            if m:
+                out[col] = m.group(1)
+        except Exception as e:
+            logger.debug(f"Failed to extract grade {col}: {e}")
 
     # Token scan fallbacks
-    tk = _scan_tokens(block)
-    for k,v in tk.items():
-        if v:
-            out[k] = v
+    try:
+        tk = _scan_tokens(block)
+        for k, v in tk.items():
+            if v:
+                out[k] = v
+    except Exception as e:
+        logger.debug(f"Failed token scanning: {e}")
 
     # Recent runs list
-    runs = _extract_recent_runs(block)
-    if runs:
-        out["RecentRuns"] = runs
+    try:
+        runs = _extract_recent_runs(block)
+        if runs:
+            out["RecentRuns"] = runs
+    except Exception as e:
+        logger.warning(f"Failed to extract recent runs: {e}")
 
     return out
 
@@ -390,8 +518,15 @@ def _enrich_section2(df: pd.DataFrame, full_text: str, debug: bool = False) -> p
     """
     Enrich header-parsed df with Section 2 details. Adds many new columns and
     populates df['RecentRuns'] (list-of-dicts). Repairs Distance if missing.
+    
+    Handles all extraction errors gracefully - continues processing even if individual
+    dogs fail to parse. All errors are logged for debugging.
     """
-    txt = _norm(full_text)
+    try:
+        txt = _norm(full_text)
+    except Exception as e:
+        logger.error(f"Failed to normalize text: {e}")
+        return df
 
     ensure_cols = [
         "Colour", "Sex", "Age", "Sire", "Dam",
@@ -410,44 +545,70 @@ def _enrich_section2(df: pd.DataFrame, full_text: str, debug: bool = False) -> p
 
     names_upper = [str(n).upper().strip() for n in df["DogName"].fillna("")]
     matched = missed = 0
+    extraction_errors = 0
 
     for idx, row in df.iterrows():
-        name = str(row["DogName"]).upper().strip()
-        if not name:
-            missed += 1
-            continue
+        try:
+            name = str(row["DogName"]).upper().strip()
+            if not name:
+                missed += 1
+                logger.debug(f"Row {idx}: Empty dog name, skipping")
+                continue
 
-        block = _find_block(txt, name, names_upper)
-        if not block:
-            missed += 1
+            # Find the dog's detail block
+            try:
+                block = _find_block(txt, name, names_upper)
+            except Exception as e:
+                logger.warning(f"Error finding block for {name}: {e}")
+                missed += 1
+                continue
+            
+            if not block:
+                missed += 1
+                logger.debug(f"No detail block found for {name}")
+                if debug:
+                    print(f"[MISS] {name}")
+                continue
+
+            # Extract fields from block
+            try:
+                fields = _extract_fields(block)
+            except Exception as e:
+                logger.error(f"Error extracting fields for {name}: {e}")
+                extraction_errors += 1
+                continue
+
+            # Write back fields with error handling
+            try:
+                for k, v in fields.items():
+                    if k == "RecentRuns":
+                        if v:
+                            df.at[idx, "RecentRuns"] = v
+                    else:
+                        if v is not None and v != "":
+                            df.at[idx, k] = v
+
+                # Distance repair from DetectedDistance
+                if ("Distance" in df.columns) and (pd.isna(row.get("Distance")) or not row.get("Distance")):
+                    if fields.get("DetectedDistance"):
+                        df.at[idx, "Distance"] = fields["DetectedDistance"]
+            except Exception as e:
+                logger.error(f"Error writing fields for {name}: {e}")
+                extraction_errors += 1
+
+            matched += 1
             if debug:
-                print(f"[MISS] {name}")
+                print(f"[OK] {name}")
+                
+        except Exception as e:
+            logger.error(f"Unexpected error processing row {idx}: {e}")
+            extraction_errors += 1
             continue
-
-        fields = _extract_fields(block)
-
-        # Write back fields
-        for k, v in fields.items():
-            if k == "RecentRuns":
-                if v:
-                    df.at[idx, "RecentRuns"] = v
-            else:
-                if v is not None and v != "":
-                    df.at[idx, k] = v
-
-        # Distance repair from DetectedDistance
-        if ("Distance" in df.columns) and (pd.isna(row.get("Distance")) or not row.get("Distance")):
-            if fields.get("DetectedDistance"):
-                df.at[idx, "Distance"] = fields["DetectedDistance"]
-
-        matched += 1
-        if debug:
-            print(f"[OK] {name}")
 
     if debug:
-        print(f"[Section2] Matched={matched} Missed={missed}")
+        print(f"[Section2] Matched={matched} Missed={missed} Errors={extraction_errors}")
 
-    print(f"✅ Enriched {matched} dogs using deep Section 2 parser.")
+    logger.info(f"✅ Enriched {matched} dogs using deep Section 2 parser (missed: {missed}, errors: {extraction_errors})")
     return df
 
 
